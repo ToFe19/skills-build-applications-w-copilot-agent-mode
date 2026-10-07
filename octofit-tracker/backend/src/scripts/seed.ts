@@ -6,7 +6,6 @@ import User from '../models/User.js';
 import Workout from '../models/Workout.js';
 
 const connectionString = process.env.MONGODB_URI || 'mongodb://localhost:27017/octofit_db';
-const upsertOptions = { upsert: true, returnDocument: 'after' as const, setDefaultsOnInsert: true };
 
 const userData = [
   { name: 'Maya Chen', email: 'maya.chen@example.com', age: 29, activityGoal: 'Run a 5K under 25 minutes' },
@@ -39,13 +38,15 @@ async function seedDatabase() {
     console.log('Seed the octofit_db database with test data');
 
     const users = await Promise.all(
-      userData.map(({ name, email, age, activityGoal }) =>
-        User.findOneAndUpdate(
+      userData.map(async ({ name, email, age, activityGoal }) => {
+        const userDataItem = { name, email, age, activityGoal };
+        const user = await User.findOneAndUpdate(
           { email },
-          { $set: { name, email, age, activityGoal } },
-          upsertOptions,
-        ),
-      ),
+          { $set: userDataItem },
+          { returnDocument: 'after' },
+        );
+        return user ?? User.create(userDataItem);
+      }),
     );
 
     for (const teamDataItem of teamData) {
@@ -56,13 +57,19 @@ async function seedDatabase() {
         }
         return user._id;
       });
+      const teamFields = {
+        name: teamDataItem.name,
+        description: teamDataItem.description,
+        members,
+      };
       const team = await Team.findOneAndUpdate(
         { name: teamDataItem.name },
-        { $set: { name: teamDataItem.name, description: teamDataItem.description, members } },
-        upsertOptions,
+        { $set: teamFields },
+        { returnDocument: 'after' },
       );
+      const savedTeam = team ?? (await Team.create(teamFields));
 
-      await User.updateMany({ _id: { $in: members } }, { $set: { team: team?._id } });
+      await User.updateMany({ _id: { $in: members } }, { $set: { team: savedTeam._id } });
     }
 
     const activities = [
@@ -79,20 +86,22 @@ async function seedDatabase() {
       }
 
       const date = new Date(activity.date);
-      await Activity.findOneAndUpdate(
+      const activityFields = {
+        user: user._id,
+        type: activity.type,
+        durationMinutes: activity.durationMinutes,
+        distanceKm: activity.distanceKm,
+        caloriesBurned: activity.caloriesBurned,
+        date,
+      };
+      const existingActivity = await Activity.findOneAndUpdate(
         { user: user._id, type: activity.type, date },
-        {
-          $set: {
-            user: user._id,
-            type: activity.type,
-            durationMinutes: activity.durationMinutes,
-            distanceKm: activity.distanceKm,
-            caloriesBurned: activity.caloriesBurned,
-            date,
-          },
-        },
-        upsertOptions,
+        { $set: activityFields },
+        { returnDocument: 'after' },
       );
+      if (!existingActivity) {
+        await Activity.create(activityFields);
+      }
     }
 
     const periodStart = new Date('2026-10-05T00:00:00.000Z');
@@ -109,11 +118,21 @@ async function seedDatabase() {
         throw new Error(`No seeded user found for ${entry.email}`);
       }
 
-      await Leaderboard.findOneAndUpdate(
+      const leaderboardFields = {
+        user: user._id,
+        points: entry.points,
+        rank: entry.rank,
+        period: 'weekly',
+        periodStart,
+      };
+      const leaderboardEntry = await Leaderboard.findOneAndUpdate(
         { user: user._id, period: 'weekly', periodStart },
-        { $set: { user: user._id, ...entry, period: 'weekly', periodStart } },
-        upsertOptions,
+        { $set: leaderboardFields },
+        { returnDocument: 'after' },
       );
+      if (!leaderboardEntry) {
+        await Leaderboard.create(leaderboardFields);
+      }
     }
 
     const workouts = [
@@ -150,9 +169,15 @@ async function seedDatabase() {
     ];
 
     await Promise.all(
-      workouts.map(({ title, ...workout }) =>
-        Workout.findOneAndUpdate({ title }, { $set: { title, ...workout } }, upsertOptions),
-      ),
+      workouts.map(async ({ title, ...workout }) => {
+        const workoutFields = { title, ...workout };
+        const existingWorkout = await Workout.findOneAndUpdate(
+          { title },
+          { $set: workoutFields },
+          { returnDocument: 'after' },
+        );
+        return existingWorkout ?? Workout.create(workoutFields);
+      }),
     );
 
     const counts = await Promise.all([
