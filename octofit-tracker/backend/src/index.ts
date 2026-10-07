@@ -1,5 +1,10 @@
 import cors from 'cors';
 import express from 'express';
+import Activity from './models/Activity.js';
+import Leaderboard from './models/Leaderboard.js';
+import Team from './models/Team.js';
+import User from './models/User.js';
+import Workout from './models/Workout.js';
 import database from './config/database.js';
 
 const app = express();
@@ -32,15 +37,30 @@ app.get('/api/health', (_request, response) => {
   });
 });
 
-const emptyCollection = (_request: express.Request, response: express.Response) => {
-  response.json([]);
-};
+app.get('/api/users/', async (_request, response) => {
+  response.json(await User.find().populate('team', 'name').sort({ name: 1 }).lean());
+});
 
-app.get('/api/users/', emptyCollection);
-app.get('/api/teams/', emptyCollection);
-app.get('/api/activities/', emptyCollection);
-app.get('/api/leaderboard/', emptyCollection);
-app.get('/api/workouts/', emptyCollection);
+app.get('/api/teams/', async (_request, response) => {
+  response.json(await Team.find().populate('members', 'name email').sort({ name: 1 }).lean());
+});
+
+app.get('/api/activities/', async (_request, response) => {
+  response.json(await Activity.find().populate('user', 'name').sort({ date: -1 }).lean());
+});
+
+app.get('/api/leaderboard/', async (_request, response) => {
+  response.json(
+    await Leaderboard.find()
+      .populate({ path: 'user', select: 'name team', populate: { path: 'team', select: 'name' } })
+      .sort({ periodStart: -1, rank: 1 })
+      .lean(),
+  );
+});
+
+app.get('/api/workouts/', async (_request, response) => {
+  response.json(await Workout.find().sort({ title: 1 }).lean());
+});
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`OctoFit API listening on port ${port}`);
